@@ -1,0 +1,274 @@
+name: Mobile AppSec Pipeline
+
+# Mirrors the CI/CD Reference Pipeline (Flutter row):
+#   Lint → Build + SBOM → Unit Test → SAST / SCA → Package
+#
+# Legend (from diagram):
+#   [RECOMMENDED] = security-relevant, strongly advised
+#   [NICE-TO-HAVE] = security-relevant, optional
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly re-scan (Trivy vuln DB refresh) every Monday 07:00 UTC
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: hello_app
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE 1 · LINT
+# Tools: flutter analyze, dart format --check, dart_code_metrics (optional)
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+  lint:
+    name: "Lint"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # flutter analyze = static lint (security rules included)
+      - name: flutter analyze
+        run: flutter analyze --no-pub
+
+      # dart format --check = formatting, fails if code is not formatted
+      - name: dart format check
+        run: dart format --check .
+
+      # [NICE-TO-HAVE] dart_code_metrics for extended rule set
+      - name: dart_code_metrics
+        continue-on-error: true   # nice-to-have: does not block pipeline
+        run: |
+          dart pub global activate dart_code_metrics
+          dart pub global run dart_code_metrics:metrics analyze lib
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE 2 · BUILD + SBOM
+# Tools: flutter build web, flutter build apk, Trivy (CycloneDX) [RECOMMENDED]
+# SBOM is passed as artifact to SAST/SCA stage
+# ─────────────────────────────────────────────────────────────────────────────
+  build:
+    name: "Build + SBOM"
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Setup Java (required for Android build)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Web
+        run: flutter build web --release
+
+      - name: Build Android APK (debug – no signing required)
+        run: flutter build apk --debug
+
+      # [RECOMMENDED] Generate SBOM with Trivy in CycloneDX format
+      # SBOM covers: Dart/pub dependencies + OS packages in build env
+      - name: Generate SBOM (Trivy · CycloneDX JSON)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: hello_app
+          format: cyclonedx
+          output: sbom.cdx.json
+        # Override working-directory — trivy-action runs from repo root
+        env:
+          TRIVY_SKIP_DB_UPDATE: "false"
+
+      - name: Generate SBOM (Trivy · CycloneDX XML)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: hello_app
+          format: cyclonedx
+          output: sbom.cdx.xml
+
+      # Upload SBOM so the SAST/SCA stage can consume it
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: |
+            sbom.cdx.json
+            sbom.cdx.xml
+          retention-days: 90
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-outputs
+          path: |
+            hello_app/build/web/
+            hello_app/build/app/outputs/flutter-apk/
+          retention-days: 30
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE 3 · UNIT TEST
+# Tools: flutter test --coverage, lcov
+# ─────────────────────────────────────────────────────────────────────────────
+  test:
+    name: "Unit Test"
+    runs-on: ubuntu-latest
+    needs: lint   # runs in parallel with build after lint passes
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Run tests with coverage
+        run: flutter test --coverage
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: hello_app/coverage/
+          retention-days: 30
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE 4 · SAST / SCA
+# Uses SBOM from Build stage as input for SCA
+# Tools:
+#   [NICE-TO-HAVE] Semgrep (SAST)
+#   [RECOMMENDED]  Trivy SCA → vulnerability scan + license check (via SBOM)
+#   [RECOMMENDED]  Gitleaks (secret scanning)
+# ─────────────────────────────────────────────────────────────────────────────
+  sast-sca:
+    name: "SAST / SCA"
+    runs-on: ubuntu-latest
+    needs: [build, test]
+    permissions:
+      security-events: write   # required to upload SARIF to GitHub Security tab
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history needed for Gitleaks
+
+      # Download SBOM generated in Build stage
+      - name: Download SBOM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom
+          path: sbom/
+
+      # ── [NICE-TO-HAVE] Semgrep SAST ────────────────────────────────────────
+      - name: Semgrep SAST
+        uses: semgrep/semgrep-action@v1
+        continue-on-error: true   # nice-to-have: does not block pipeline
+        with:
+          config: auto
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+      # ── [RECOMMENDED] Trivy SCA – Vulnerability Scan (uses SBOM) ───────────
+      - name: Trivy · Vulnerability Scan (via SBOM)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: sbom
+          scan-ref: sbom/sbom.cdx.json
+          format: sarif
+          output: trivy-vuln.sarif
+          severity: CRITICAL,HIGH,MEDIUM
+          exit-code: "0"   # set to 1 to break pipeline on findings
+
+      - name: Upload Trivy vuln results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-vuln.sarif
+          category: trivy-vulnerabilities
+
+      # ── [RECOMMENDED] Trivy SCA – License Check (uses SBOM) ────────────────
+      - name: Trivy · License Check (via SBOM)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: sbom
+          scan-ref: sbom/sbom.cdx.json
+          scanners: license
+          format: table
+          exit-code: "0"   # set to 1 to enforce license policy
+
+      # ── [RECOMMENDED] Gitleaks – Secret Scanning ───────────────────────────
+      - name: Gitleaks · Secret Scanning
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE 5 · PACKAGE
+# [RECOMMENDED] Publish SBOM as release artifact (CRA Annex I requirement)
+# ─────────────────────────────────────────────────────────────────────────────
+  package:
+    name: "Package"
+    runs-on: ubuntu-latest
+    needs: sast-sca
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download SBOM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom
+          path: sbom/
+
+      - name: Download build outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: build-outputs
+          path: build-outputs/
+
+      # [RECOMMENDED] Archive SBOM alongside release artifacts (CRA Annex I)
+      - name: Publish SBOM + build as GitHub release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle-${{ github.sha }}
+          path: |
+            sbom/sbom.cdx.json
+            sbom/sbom.cdx.xml
+            build-outputs/
+          retention-days: 365   # keep for audit trail
