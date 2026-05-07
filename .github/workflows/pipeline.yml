@@ -1,12 +1,5 @@
 name: Mobile AppSec Pipeline
 
-# Mirrors the CI/CD Reference Pipeline (Flutter row):
-#   Lint → Build + SBOM → Unit Test → SAST / SCA → Package
-#
-# Legend (from diagram):
-#   [RECOMMENDED] = security-relevant, strongly advised
-#   [NICE-TO-HAVE] = security-relevant, optional
-
 on:
   push:
     branches: [main]
@@ -27,7 +20,7 @@ defaults:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 1 · LINT
-# Tools: flutter analyze, dart format --check, dart_code_metrics (optional)
+# Tools: flutter analyze, dart format --check, dart_code_metrics
 # ─────────────────────────────────────────────────────────────────────────────
 jobs:
   lint:
@@ -55,16 +48,16 @@ jobs:
       - name: dart format check
         run: dart format --set-exit-if-changed .
 
-      # [NICE-TO-HAVE] dart_code_metrics for extended rule set
+      # dart_code_metrics for extended rule set
       - name: dart_code_metrics
-        continue-on-error: true   # nice-to-have: does not block pipeline
+        continue-on-error: true   # does not block pipeline
         run: |
           dart pub global activate dart_code_metrics
           dart pub global run dart_code_metrics:metrics analyze lib
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 2 · BUILD + SBOM
-# Tools: flutter build web, flutter build apk, Trivy (CycloneDX) [RECOMMENDED]
+# Tools: flutter build web, flutter build apk, Trivy (CycloneDX)
 # SBOM is passed as artifact to SAST/SCA stage
 # ─────────────────────────────────────────────────────────────────────────────
   build:
@@ -97,10 +90,10 @@ jobs:
       - name: Build Android APK (debug – no signing required)
         run: flutter build apk --debug
 
-      # [RECOMMENDED] Generate SBOM with Trivy in CycloneDX format
+      # Generate SBOM with Trivy in CycloneDX format
       # SBOM covers: Dart/pub dependencies + OS packages in build env
       - name: Generate SBOM (Trivy · CycloneDX JSON)
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: hello_app
@@ -152,11 +145,10 @@ jobs:
       - name: Run tests with coverage
         run: flutter test --coverage
 
-      # [NICE-TO-HAVE] Upload coverage to Codecov for PR visibility
       # Requires CODECOV_TOKEN secret (free for public repos at codecov.io)
       - name: Upload to Codecov
         uses: codecov/codecov-action@v5
-        continue-on-error: true   # nice-to-have: does not block pipeline
+        continue-on-error: true   # does not block pipeline
         with:
           files: hello_app/coverage/lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -171,11 +163,11 @@ jobs:
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 4 · SAST / SCA
 # Tools:
-#   [NICE-TO-HAVE] Semgrep (SAST)
-#   [RECOMMENDED]  osv-scanner → Dart/pub vulnerability scan (uses OSV database,
+#   Semgrep (SAST)
+#   osv-scanner → Dart/pub vulnerability scan (uses OSV database,
 #                  same source as Flutter's own advisory warnings)
-#   [RECOMMENDED]  Trivy SCA → vulnerability scan + license check (via SBOM)
-#   [RECOMMENDED]  Gitleaks (secret scanning)
+#   Trivy SCA → vulnerability scan + license check (via SBOM)
+#   Gitleaks (secret scanning)
 #
 # NOTE: osv-scanner and Trivy complement each other:
 #   osv-scanner = better Dart/pub coverage (same DB as flutter pub get warnings)
@@ -202,23 +194,18 @@ jobs:
           name: sbom
           path: sbom/
 
-      # ── [NICE-TO-HAVE] Semgrep SAST ────────────────────────────────────────
+      # ── Semgrep SAST ────────────────────────────────────────
       # Runs with open-source rules (no token needed).
       # Set SEMGREP_APP_TOKEN secret to also send results to Semgrep dashboard.
       - name: Semgrep SAST
         uses: semgrep/semgrep-action@v1
-        continue-on-error: true   # nice-to-have: does not block pipeline
+        continue-on-error: true   # does not block pipeline
         with:
           config: auto
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN || '' }}
 
-      # ── [RECOMMENDED] osv-scanner – Dart/pub Vulnerability Scan ────────────
-      # Uses Google's OSV database – same source as Flutter's own advisory
-      # warnings ("Dependencies are affected by security advisories").
-      # More comprehensive for Dart/pub than Trivy's vulnerability DB.
-      # Note: google/osv-scanner-action is a reusable workflow (job-level only),
-      # so we install the CLI binary directly.
+      # ── osv-scanner – Dart/pub Vulnerability Scan ────────────
       - name: Install osv-scanner
         run: |
           curl -sSL https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64 \
@@ -230,10 +217,10 @@ jobs:
         run: osv-scanner scan --lockfile=hello_app/pubspec.lock
         continue-on-error: true   # set to false to block pipeline on findings
 
-      # ── [RECOMMENDED] Trivy SCA – Vulnerability Scan (uses SBOM) ───────────
+      # ── Trivy SCA – Vulnerability Scan (uses SBOM) ───────────
       # Complements osv-scanner: broader ecosystem coverage + SARIF output
       - name: Trivy · Vulnerability Scan (via SBOM)
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: sbom
           scan-ref: sbom/sbom.cdx.json
@@ -248,9 +235,9 @@ jobs:
           sarif_file: trivy-vuln.sarif
           category: trivy-vulnerabilities
 
-      # ── [RECOMMENDED] Trivy SCA – License Check (uses SBOM) ────────────────
+      # ── Trivy SCA – License Check (uses SBOM) ────────────────
       - name: Trivy · License Check (via SBOM)
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: sbom
           scan-ref: sbom/sbom.cdx.json
@@ -258,7 +245,7 @@ jobs:
           format: table
           exit-code: "0"   # set to 1 to enforce license policy
 
-      # ── [RECOMMENDED] Gitleaks – Secret Scanning ───────────────────────────
+      # ── [Gitleaks – Secret Scanning ───────────────────────────
       - name: Gitleaks · Secret Scanning
         uses: gitleaks/gitleaks-action@v2
         env:
@@ -266,7 +253,7 @@ jobs:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 5 · PACKAGE
-# [RECOMMENDED] Publish SBOM as release artifact (CRA Annex I requirement)
+# Publish SBOM as release artifact (CRA Annex I requirement)
 # ─────────────────────────────────────────────────────────────────────────────
   package:
     name: "Package"
@@ -290,7 +277,7 @@ jobs:
           name: build-outputs
           path: build-outputs/
 
-      # [RECOMMENDED] Archive SBOM alongside release artifacts (CRA Annex I)
+      # Archive SBOM alongside release artifacts (CRA Annex I)
       - name: Publish SBOM + build as GitHub release asset
         uses: actions/upload-artifact@v7.0.1
         with:
@@ -299,38 +286,3 @@ jobs:
             sbom/sbom.cdx.json
             build-outputs/
           retention-days: 90   # max allowed by repo settings; extend in repo Settings → Actions
-
-# ─────────────────────────────────────────────────────────────────────────────
-# STAGE 6 · OPENSSF SCORECARD
-# [NICE-TO-HAVE] Publishes a public security score to scorecard.dev
-# Badge: https://api.scorecard.dev/projects/github.com/mmmaction/mobile-appsec-lab/badge
-# Runs only on push to main (not on PRs – publish_results requires it)
-# Requires: repo must be public OR SCORECARD_TOKEN secret set
-# ─────────────────────────────────────────────────────────────────────────────
-  scorecard:
-    name: "OpenSSF Scorecard"
-    runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
-    permissions:
-      security-events: write   # upload SARIF to GitHub Security tab
-      id-token: write          # required for publish_results: true
-      contents: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Run Scorecard
-        uses: ossf/scorecard-action@v2.4.0
-        with:
-          results_file: scorecard.sarif
-          results_format: sarif
-          publish_results: true   # powers the scorecard.dev badge
-
-      - name: Upload Scorecard SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: scorecard.sarif
-          category: openssf-scorecard
