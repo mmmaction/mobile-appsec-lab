@@ -1,5 +1,18 @@
 # mobile-appsec-lab
 
+<!-- CI/CD -->
+![Pipeline](https://github.com/mmmaction/mobile-appsec-lab/actions/workflows/pipeline.yml/badge.svg)
+<!-- Coverage (activate after adding CODECOV_TOKEN secret at codecov.io) -->
+[![codecov](https://codecov.io/gh/mmmaction/mobile-appsec-lab/branch/main/graph/badge.svg)](https://codecov.io/gh/mmmaction/mobile-appsec-lab)
+<!-- Security -->
+[![Gitleaks](https://img.shields.io/badge/security-gitleaks-blue)](https://github.com/gitleaks/gitleaks)
+[![SBOM](https://img.shields.io/badge/SBOM-CycloneDX-blue)](https://cyclonedx.org/)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/mmmaction/mobile-appsec-lab/badge)](https://scorecard.dev/viewer/?uri=github.com/mmmaction/mobile-appsec-lab)
+<!-- Flutter -->
+[![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter)](https://flutter.dev)
+<!-- License -->
+[![License](https://img.shields.io/github/license/mmmaction/mobile-appsec-lab)](LICENSE)
+
 A reference implementation showing how to integrate security tooling into a Flutter CI/CD pipeline. The repo contains a minimal Flutter hello-world app (`hello_app`) and a GitHub Actions pipeline that demonstrates practical security measures for mobile app development.
 
 ---

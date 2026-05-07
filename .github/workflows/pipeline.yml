@@ -36,7 +36,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -74,7 +74,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -83,7 +83,7 @@ jobs:
           cache: true
 
       - name: Setup Java (required for Android build)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -100,7 +100,7 @@ jobs:
       # [RECOMMENDED] Generate SBOM with Trivy in CycloneDX format
       # SBOM covers: Dart/pub dependencies + OS packages in build env
       - name: Generate SBOM (Trivy · CycloneDX JSON)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           scan-type: fs
           scan-ref: hello_app
@@ -112,14 +112,14 @@ jobs:
 
       # Upload SBOM so the SAST/SCA stage can consume it
       - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: sbom
           path: sbom.cdx.json
           retention-days: 90
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: build-outputs
           path: |
@@ -138,7 +138,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -152,8 +152,17 @@ jobs:
       - name: Run tests with coverage
         run: flutter test --coverage
 
+      # [NICE-TO-HAVE] Upload coverage to Codecov for PR visibility
+      # Requires CODECOV_TOKEN secret (free for public repos at codecov.io)
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
+        continue-on-error: true   # nice-to-have: does not block pipeline
+        with:
+          files: hello_app/coverage/lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+
       - name: Upload coverage report
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: coverage-report
           path: hello_app/coverage/
@@ -182,7 +191,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0   # full history needed for Gitleaks
 
@@ -208,17 +217,23 @@ jobs:
       # Uses Google's OSV database – same source as Flutter's own advisory
       # warnings ("Dependencies are affected by security advisories").
       # More comprehensive for Dart/pub than Trivy's vulnerability DB.
+      # Note: google/osv-scanner-action is a reusable workflow (job-level only),
+      # so we install the CLI binary directly.
+      - name: Install osv-scanner
+        run: |
+          curl -sSL https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64 \
+            -o /usr/local/bin/osv-scanner
+          chmod +x /usr/local/bin/osv-scanner
+
       - name: osv-scanner · Dart/pub Vulnerability Scan
-        uses: google/osv-scanner-action@v2.3.5
-        with:
-          scan-args: |-
-            --lockfile=hello_app/pubspec.lock
+        working-directory: ${{ github.workspace }}
+        run: osv-scanner scan --lockfile=hello_app/pubspec.lock
         continue-on-error: true   # set to false to block pipeline on findings
 
       # ── [RECOMMENDED] Trivy SCA – Vulnerability Scan (uses SBOM) ───────────
       # Complements osv-scanner: broader ecosystem coverage + SARIF output
       - name: Trivy · Vulnerability Scan (via SBOM)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           scan-type: sbom
           scan-ref: sbom/sbom.cdx.json
@@ -235,7 +250,7 @@ jobs:
 
       # ── [RECOMMENDED] Trivy SCA – License Check (uses SBOM) ────────────────
       - name: Trivy · License Check (via SBOM)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           scan-type: sbom
           scan-ref: sbom/sbom.cdx.json
@@ -261,7 +276,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
 
       - name: Download SBOM artifact
         uses: actions/download-artifact@v4
@@ -277,10 +292,45 @@ jobs:
 
       # [RECOMMENDED] Archive SBOM alongside release artifacts (CRA Annex I)
       - name: Publish SBOM + build as GitHub release asset
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: release-bundle-${{ github.sha }}
           path: |
             sbom/sbom.cdx.json
             build-outputs/
           retention-days: 90   # max allowed by repo settings; extend in repo Settings → Actions
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE 6 · OPENSSF SCORECARD
+# [NICE-TO-HAVE] Publishes a public security score to scorecard.dev
+# Badge: https://api.scorecard.dev/projects/github.com/mmmaction/mobile-appsec-lab/badge
+# Runs only on push to main (not on PRs – publish_results requires it)
+# Requires: repo must be public OR SCORECARD_TOKEN secret set
+# ─────────────────────────────────────────────────────────────────────────────
+  scorecard:
+    name: "OpenSSF Scorecard"
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    permissions:
+      security-events: write   # upload SARIF to GitHub Security tab
+      id-token: write          # required for publish_results: true
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard
+        uses: ossf/scorecard-action@v2.4.0
+        with:
+          results_file: scorecard.sarif
+          results_format: sarif
+          publish_results: true   # powers the scorecard.dev badge
+
+      - name: Upload Scorecard SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: scorecard.sarif
+          category: openssf-scorecard
