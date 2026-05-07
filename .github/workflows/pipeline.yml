@@ -246,8 +246,13 @@ jobs:
           exit-code: "0"   # set to 1 to enforce license policy
 
       # ── [Gitleaks – Secret Scanning ───────────────────────────
+      # log-opts: "--all" scans the full git history, not just the current push.
+      # Default behaviour (-1) only checks commits in the triggering push event,
+      # so secrets committed in earlier pushes go undetected.
       - name: Gitleaks · Secret Scanning
         uses: gitleaks/gitleaks-action@v2
+        with:
+          log-opts: "--all"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
