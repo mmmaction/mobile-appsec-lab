@@ -47,9 +47,9 @@ jobs:
       - name: flutter analyze
         run: flutter analyze --no-pub
 
-      # dart format --check = formatting, fails if code is not formatted
+      # dart format --set-exit-if-changed = fails if any file would be reformatted
       - name: dart format check
-        run: dart format --check .
+        run: dart format --set-exit-if-changed .
 
       # [NICE-TO-HAVE] dart_code_metrics for extended rule set
       - name: dart_code_metrics
@@ -106,22 +106,12 @@ jobs:
         env:
           TRIVY_SKIP_DB_UPDATE: "false"
 
-      - name: Generate SBOM (Trivy · CycloneDX XML)
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: fs
-          scan-ref: hello_app
-          format: cyclonedx
-          output: sbom.cdx.xml
-
       # Upload SBOM so the SAST/SCA stage can consume it
       - name: Upload SBOM artifact
         uses: actions/upload-artifact@v4
         with:
           name: sbom
-          path: |
-            sbom.cdx.json
-            sbom.cdx.xml
+          path: sbom.cdx.json
           retention-days: 90
 
       - name: Upload build artifacts
@@ -195,13 +185,15 @@ jobs:
           path: sbom/
 
       # ── [NICE-TO-HAVE] Semgrep SAST ────────────────────────────────────────
+      # Runs with open-source rules (no token needed).
+      # Set SEMGREP_APP_TOKEN secret to also send results to Semgrep dashboard.
       - name: Semgrep SAST
         uses: semgrep/semgrep-action@v1
         continue-on-error: true   # nice-to-have: does not block pipeline
         with:
           config: auto
         env:
-          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN || '' }}
 
       # ── [RECOMMENDED] Trivy SCA – Vulnerability Scan (uses SBOM) ───────────
       - name: Trivy · Vulnerability Scan (via SBOM)
@@ -269,6 +261,5 @@ jobs:
           name: release-bundle-${{ github.sha }}
           path: |
             sbom/sbom.cdx.json
-            sbom/sbom.cdx.xml
             build-outputs/
           retention-days: 365   # keep for audit trail

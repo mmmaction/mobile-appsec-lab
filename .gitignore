@@ -107,9 +107,8 @@ unlinked_spec.ds
 # Coverage
 coverage/
 
-# SBOM files generated locally / by CI (uploaded as artifacts, not committed)
+# SBOM file generated locally / by CI (uploaded as artifact, not committed)
 sbom.cdx.json
-sbom.cdx.xml
 
 # Symbols
 app.*.symbols
