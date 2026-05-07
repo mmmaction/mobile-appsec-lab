@@ -17,6 +17,10 @@ on:
     - cron: "0 7 * * 1"
   workflow_dispatch:
 
+# Force Node.js 24 for all actions (Node.js 20 deprecated from June 2026)
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 defaults:
   run:
     working-directory: hello_app
@@ -157,11 +161,16 @@ jobs:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 4 · SAST / SCA
-# Uses SBOM from Build stage as input for SCA
 # Tools:
 #   [NICE-TO-HAVE] Semgrep (SAST)
+#   [RECOMMENDED]  osv-scanner → Dart/pub vulnerability scan (uses OSV database,
+#                  same source as Flutter's own advisory warnings)
 #   [RECOMMENDED]  Trivy SCA → vulnerability scan + license check (via SBOM)
 #   [RECOMMENDED]  Gitleaks (secret scanning)
+#
+# NOTE: osv-scanner and Trivy complement each other:
+#   osv-scanner = better Dart/pub coverage (same DB as flutter pub get warnings)
+#   Trivy       = broader ecosystem + license scanning via SBOM
 # ─────────────────────────────────────────────────────────────────────────────
   sast-sca:
     name: "SAST / SCA"
@@ -195,7 +204,19 @@ jobs:
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN || '' }}
 
+      # ── [RECOMMENDED] osv-scanner – Dart/pub Vulnerability Scan ────────────
+      # Uses Google's OSV database – same source as Flutter's own advisory
+      # warnings ("Dependencies are affected by security advisories").
+      # More comprehensive for Dart/pub than Trivy's vulnerability DB.
+      - name: osv-scanner · Dart/pub Vulnerability Scan
+        uses: google/osv-scanner-action@v2
+        with:
+          scan-args: |-
+            --lockfile=hello_app/pubspec.lock
+        continue-on-error: true   # set to false to block pipeline on findings
+
       # ── [RECOMMENDED] Trivy SCA – Vulnerability Scan (uses SBOM) ───────────
+      # Complements osv-scanner: broader ecosystem coverage + SARIF output
       - name: Trivy · Vulnerability Scan (via SBOM)
         uses: aquasecurity/trivy-action@master
         with:
@@ -207,7 +228,7 @@ jobs:
           exit-code: "0"   # set to 1 to break pipeline on findings
 
       - name: Upload Trivy vuln results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-vuln.sarif
           category: trivy-vulnerabilities
@@ -262,4 +283,4 @@ jobs:
           path: |
             sbom/sbom.cdx.json
             build-outputs/
-          retention-days: 365   # keep for audit trail
+          retention-days: 90   # max allowed by repo settings; extend in repo Settings → Actions

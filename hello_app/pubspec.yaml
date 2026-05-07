@@ -35,6 +35,12 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
 
+  # DEMO: intentionally pinned to vulnerable version (<= 0.3.5)
+  # CVE-2026-34240 (GHSA-vm9r-h74p-hg97) – High severity
+  # Allows JWT token forgery via attacker-controlled JWK in JOSE header
+  # Fix: upgrade to jose 0.3.5+1 or later
+  jose: 0.3.5
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
