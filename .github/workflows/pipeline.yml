@@ -36,7 +36,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -74,7 +74,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -112,14 +112,14 @@ jobs:
 
       # Upload SBOM so the SAST/SCA stage can consume it
       - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sbom
           path: sbom.cdx.json
           retention-days: 90
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build-outputs
           path: |
@@ -138,7 +138,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -153,7 +153,7 @@ jobs:
         run: flutter test --coverage
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: hello_app/coverage/
@@ -182,7 +182,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0   # full history needed for Gitleaks
 
@@ -209,7 +209,7 @@ jobs:
       # warnings ("Dependencies are affected by security advisories").
       # More comprehensive for Dart/pub than Trivy's vulnerability DB.
       - name: osv-scanner · Dart/pub Vulnerability Scan
-        uses: google/osv-scanner-action@v2
+        uses: google/osv-scanner-action@v2.3.5
         with:
           scan-args: |-
             --lockfile=hello_app/pubspec.lock
@@ -261,7 +261,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download SBOM artifact
         uses: actions/download-artifact@v4
@@ -277,7 +277,7 @@ jobs:
 
       # [RECOMMENDED] Archive SBOM alongside release artifacts (CRA Annex I)
       - name: Publish SBOM + build as GitHub release asset
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-bundle-${{ github.sha }}
           path: |
