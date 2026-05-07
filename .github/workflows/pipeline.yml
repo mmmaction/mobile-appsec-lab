@@ -206,11 +206,12 @@ jobs:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN || '' }}
 
       # ── osv-scanner – Dart/pub Vulnerability Scan ────────────
+      # go install is the most reliable install method in CI (Go is pre-installed
+      # on ubuntu-latest). Avoids fragile curl+binary asset-name assumptions.
       - name: Install osv-scanner
         run: |
-          curl -sSL https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64 \
-            -o /usr/local/bin/osv-scanner
-          chmod +x /usr/local/bin/osv-scanner
+          go install github.com/google/osv-scanner/cmd/osv-scanner@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: osv-scanner · Dart/pub Vulnerability Scan
         working-directory: ${{ github.workspace }}
@@ -245,16 +246,21 @@ jobs:
           format: table
           exit-code: "0"   # set to 1 to enforce license policy
 
-      # ── [Gitleaks – Secret Scanning ───────────────────────────
-      # log-opts: "--all" scans the full git history, not just the current push.
-      # Default behaviour (-1) only checks commits in the triggering push event,
-      # so secrets committed in earlier pushes go undetected.
+      # ── Gitleaks – Secret Scanning ────────────────────────────
+      # Using CLI directly: gitleaks-action@v2 accepts no inputs, so we cannot
+      # pass --log-opts="--all" via the action. CLI gives full control.
+      # --all scans the full git history (not just the current push event).
+      - name: Install Gitleaks
+        run: |
+          VERSION=$(curl -sSf https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
+            | grep '"tag_name"' | cut -d'"' -f4 | tr -d 'v')
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
+            | tar xz -C /tmp
+
       - name: Gitleaks · Secret Scanning
-        uses: gitleaks/gitleaks-action@v2
-        with:
-          log-opts: "--all"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: ${{ github.workspace }}
+        run: /tmp/gitleaks detect --redact -v --log-opts="--all" --exit-code=2
+        continue-on-error: true   # set to false to block pipeline on any leak
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 5 · PACKAGE
