@@ -40,6 +40,7 @@ The GitHub Actions pipeline (`.github/workflows/pipeline.yml`) is structured acc
 | **Scan · osv-scanner** | Dart/pub CVE scan — **primary CVE gate** | osv-scanner (OSV database) |
 | **Scan · trivy** | CVE scan via SBOM (documented gap) + SARIF → GitHub Security tab | Trivy |
 | **Scan · license_finder** | Dart/pub license compliance (`unknown` = package has no LICENSE file in pub cache) | `license_finder` (Pivotal) |
+| **Scan · Dependency-Track** | Upload SBOM for continuous re-scanning; 0 CVEs expected (pub advisory lag — documented) | OWASP Dependency-Track |
 | **Scan · Gitleaks** | Secret scanning (full git history) | Gitleaks |
 | **Package** | Archive SBOM + build artifacts for audit trail | GitHub Actions artifacts (365-day retention) |
 
@@ -49,13 +50,14 @@ The GitHub Actions pipeline (`.github/workflows/pipeline.yml`) is structured acc
 Build stage
   └─ Trivy generates SBOM (CycloneDX JSON)
         │
-        ▼  (all 5 run in parallel after build + test)
-  ┌───────────────────────────────────────────────────────────────────────┐
+        ▼  (all 6 run in parallel after build + test)
+  ┌───────────────────────────────────────────────────────────────────────────┐
   │  sast-semgrep        Semgrep pattern-based SAST (source)              │
   │  scan-osv            osv-scanner Dart/pub CVE scan (lockfile)         │
   │  scan-trivy          Trivy SBOM vulnerability scan (documented gap)   │
   │  scan-license-finder license_finder Dart/pub license report           │
   │  scan-gitleaks       Gitleaks secret scanning (full git history)      │
+  │  scan-deptrack       Dependency-Track SBOM upload (0 CVEs — pub lag)  │
   └───────────────────────────────────────────────────────────────────────┘
         │
         ▼
@@ -135,7 +137,7 @@ The tools are kept in the pipeline for distinct reasons:
 - **osv-scanner** → Dart/pub CVE detection (primary security gate)
 - **Trivy** → SARIF upload to GitHub Security tab for comparison; no pub CVE or license coverage
 - **license_finder** → Dart/pub license compliance; `unknown` entries mean the package has no LICENSE file in its pub cache dir (package metadata quality issue)
-- **Dependency-Track** → continuous re-scanning without a new build; catches new CVEs for already-shipped versions
+- **Dependency-Track** → continuous re-scanning without a new build; 0 CVEs currently (NVD/OSS Index lag for pub advisories) — will self-update as databases propagate
 
 ### Notable osv-scanner findings
 
@@ -263,6 +265,7 @@ gitleaks detect --source . -v
 | osv-scanner | Scan · osv-scanner | Dart/pub vulnerability scan (OSV database) |
 | Trivy | Scan · trivy | CVE scan via SBOM + SARIF → GitHub Security tab (no pub coverage — documented) |
 | license_finder | Scan · license-finder | Dart/pub license compliance (`unknown` = missing LICENSE file in pub cache) |
+| OWASP Dependency-Track | Scan · Dependency-Track | Continuous SBOM re-scanning (0 CVEs — pub advisory propagation lag documented) |
 | Gitleaks | Scan · Gitleaks | Secret scanning (full git history) |
 
 

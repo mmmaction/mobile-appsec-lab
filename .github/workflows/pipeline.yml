@@ -342,13 +342,56 @@ jobs:
         continue-on-error: true   # set to false to block pipeline on any leak
 
 # ─────────────────────────────────────────────────────────────────────────────
+# STAGE 4e · SCA — Dependency-Track (continuous monitoring)
+# Uploads SBOM to OWASP Dependency-Track for continuous CVE re-scanning.
+#
+# DOCUMENTED LIMITATION (lab result 2026-05-08):
+#   - 42 pub components ingested correctly (pkg:pub PURLs recognised)
+#   - 0 CVEs found for jose 0.3.5 (GHSA-vm9r-h74p-hg97)
+#   - Root cause: advisory not yet in NVD/OSS Index with matching pkg:pub PURL
+#   - osv-scanner and grype both find it — DT lags behind for pub advisories
+# Value: continuous re-scanning; will self-update when NVD/OSS Index propagates.
+# Requires secrets: DT_URL, DT_API_KEY (see docker-compose.yml for local setup)
+# ─────────────────────────────────────────────────────────────────────────────
+  scan-deptrack:
+    name: "Scan · Dependency-Track"
+    runs-on: ubuntu-latest
+    needs: [build, test]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Download SBOM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom
+          path: sbom/
+
+      - name: Upload SBOM to Dependency-Track
+        run: |
+          # DOCUMENTED LIMITATION: 0 CVEs expected for pub packages (NVD/OSS Index lag)
+          # See README CVE Scanner Comparison for details.
+          curl -sf \
+            --request PUT \
+            --url "${{ secrets.DT_URL }}/api/v1/bom" \
+            --header "X-Api-Key: ${{ secrets.DT_API_KEY }}" \
+            --header "Content-Type: multipart/form-data" \
+            --form "autoCreate=true" \
+            --form "projectName=mobile-appsec-lab" \
+            --form "projectVersion=${{ github.ref_name }}" \
+            --form "bom=@sbom/sbom.cdx.json" \
+          || echo "DT upload skipped — DT_URL/DT_API_KEY not configured"
+        continue-on-error: true   # external system; never block pipeline
+
+# ─────────────────────────────────────────────────────────────────────────────
 # STAGE 5 · PACKAGE
 # Publish SBOM as release artifact (CRA Annex I requirement)
 # ─────────────────────────────────────────────────────────────────────────────
   package:
     name: "Package"
     runs-on: ubuntu-latest
-    needs: [sast-semgrep, scan-osv, scan-trivy, scan-license-finder, scan-gitleaks]
+    needs: [sast-semgrep, scan-osv, scan-trivy, scan-license-finder, scan-gitleaks, scan-deptrack]
     if: github.ref == 'refs/heads/main'
 
     steps:
