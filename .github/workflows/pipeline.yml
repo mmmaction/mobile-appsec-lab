@@ -92,11 +92,14 @@ jobs:
 
       # Generate SBOM with Trivy in CycloneDX format
       # SBOM covers: Dart/pub dependencies + OS packages in build env
+      # scanners: vuln,license ensures license metadata is embedded in the SBOM
+      # so that the downstream "Trivy · License Check" step has data to report
       - name: Generate SBOM (Trivy · CycloneDX JSON)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: hello_app
+          scanners: vuln,license
           format: cyclonedx
           output: sbom.cdx.json
         # Override working-directory — trivy-action runs from repo root
