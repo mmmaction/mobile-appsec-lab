@@ -39,7 +39,7 @@ The GitHub Actions pipeline (`.github/workflows/pipeline.yml`) is structured acc
 | **SAST · Semgrep** | Pattern-based security analysis (Dart/Flutter rules) | Semgrep (`config: auto`) |
 | **Scan · osv-scanner** | Dart/pub CVE scan — **primary CVE gate** | osv-scanner (OSV database) |
 | **Scan · trivy** | CVE scan via SBOM (documented gap) + SARIF → GitHub Security tab | Trivy |
-| **Scan · pub_license** | Dart/pub license compliance — **primary license gate** | `pub_license` (VeryGoodVentures) |
+| **Scan · license_finder** | Dart/pub license compliance (`unknown` = package has no LICENSE file in pub cache) | `license_finder` (Pivotal) |
 | **Scan · Gitleaks** | Secret scanning (full git history) | Gitleaks |
 | **Package** | Archive SBOM + build artifacts for audit trail | GitHub Actions artifacts (365-day retention) |
 
@@ -51,11 +51,11 @@ Build stage
         │
         ▼  (all 5 run in parallel after build + test)
   ┌───────────────────────────────────────────────────────────────────────┐
-  │  sast-semgrep      Semgrep pattern-based SAST (source)               │
-  │  scan-osv          osv-scanner Dart/pub CVE scan (lockfile)           │
-  │  scan-trivy        Trivy SBOM vulnerability scan (documented gap)     │
-  │  scan-pub-license  pub_license Dart/pub license compliance            │
-  │  scan-gitleaks     Gitleaks secret scanning (full git history)        │
+  │  sast-semgrep        Semgrep pattern-based SAST (source)              │
+  │  scan-osv            osv-scanner Dart/pub CVE scan (lockfile)         │
+  │  scan-trivy          Trivy SBOM vulnerability scan (documented gap)   │
+  │  scan-license-finder license_finder Dart/pub license report           │
+  │  scan-gitleaks       Gitleaks secret scanning (full git history)      │
   └───────────────────────────────────────────────────────────────────────┘
         │
         ▼
@@ -134,7 +134,7 @@ This demonstrates:
 The tools are kept in the pipeline for distinct reasons:
 - **osv-scanner** → Dart/pub CVE detection (primary security gate)
 - **Trivy** → SARIF upload to GitHub Security tab for comparison; no pub CVE or license coverage
-- **pub_license** → Dart/pub license compliance (fills gap Trivy cannot cover)
+- **license_finder** → Dart/pub license compliance; `unknown` entries mean the package has no LICENSE file in its pub cache dir (package metadata quality issue)
 - **Dependency-Track** → continuous re-scanning without a new build; catches new CVEs for already-shipped versions
 
 ### Notable osv-scanner findings
@@ -222,22 +222,23 @@ trivy fs --format cyclonedx --output sbom.cdx.json hello_app
 trivy sbom --severity CRITICAL,HIGH,MEDIUM sbom.cdx.json
 ```
 
-### SCA – License Check (pub_license)
+### SCA – License Check (license_finder)
 
 ```bash
-# Install pub_license
-dart pub global activate pub_license
+# Install (Ruby pre-installed on macOS/Linux)
+gem install license_finder
 
-# Run from repo root (reads hello_app/pubspec.lock)
-export PATH="$PATH:$HOME/.pub-cache/bin"
-pub_license --not-allowed="GPL-2.0,GPL-3.0,AGPL-3.0"
+# Run from hello_app directory (needs flutter pub get first)
+cd hello_app && flutter pub get
+export PUB_CACHE="$HOME/.pub-cache"
+license_finder report --format=csv
+# 'unknown' = package has no LICENSE file in pub cache dir (package metadata gap)
 ```
 
 ### SCA – License Check (Trivy — documented gap)
 
 ```bash
 # NOTE: Trivy reports '-' (Not scanned) for pub packages — no pub license support.
-# Use pub_license above for actual Dart/pub license compliance.
 trivy sbom --scanners license sbom.cdx.json
 ```
 
@@ -261,7 +262,7 @@ gitleaks detect --source . -v
 | Semgrep | SAST · Semgrep | Pattern-based security analysis (`config: auto`, `continue-on-error`) |
 | osv-scanner | Scan · osv-scanner | Dart/pub vulnerability scan (OSV database) |
 | Trivy | Scan · trivy | CVE scan via SBOM + SARIF → GitHub Security tab (no pub coverage — documented) |
-| pub_license | Scan · pub-license | Dart/pub license compliance — fills Trivy gap for pub ecosystem |
+| license_finder | Scan · license-finder | Dart/pub license compliance (`unknown` = missing LICENSE file in pub cache) |
 | Gitleaks | Scan · Gitleaks | Secret scanning (full git history) |
 
 
