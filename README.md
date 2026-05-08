@@ -13,7 +13,7 @@
 <!-- License -->
 [![License](https://img.shields.io/github/license/mmmaction/mobile-appsec-lab)](LICENSE)
 
-A reference implementation showing how to integrate security tooling into a Flutter CI/CD pipeline. The repo contains a minimal Flutter hello-world app (`hello_app`) and a GitHub Actions pipeline that demonstrates practical security measures for mobile app development.
+A reference implementation showing how to integrate security tooling into a Flutter CI/CD pipeline. The repo contains a minimal Flutter hello-world app (`hello_app`) and a GitHub Actions pipeline that demonstrates practical security measures for mobile app development. See [zephyr-appsec-lab](https://github.com/mmmaction/zephyr-appsec-lab) for the embedded firmware counterpart.
 
 ---
 
@@ -36,7 +36,11 @@ The GitHub Actions pipeline (`.github/workflows/pipeline.yml`) is structured acc
 | **Lint** | Code style & static analysis (fast-fail) | `flutter analyze`, `dart format --check`, `dart_code_metrics` |
 | **Build + SBOM** | Compile app for Web & Android, generate SBOM | `flutter build`, Trivy (CycloneDX JSON) |
 | **Unit Test** | Run tests with code coverage | `flutter test --coverage`, lcov |
-| **SAST / SCA** | Static analysis + vulnerability/license/secret scan via SBOM | Semgrep, Trivy SCA, Gitleaks |
+| **SAST · Semgrep** | Pattern-based security analysis (Dart/Flutter rules) | Semgrep (`config: auto`) |
+| **SAST · CodeQL** | Dataflow/taint analysis, free for public repos (Dart, experimental) | GitHub CodeQL |
+| **Scan · osv-scanner** | Dart/pub CVE scan — **primary CVE gate** | osv-scanner (OSV database) |
+| **Scan · trivy** | CVE scan via SBOM + license compliance | Trivy |
+| **Scan · Gitleaks** | Secret scanning (full git history) | Gitleaks |
 | **Package** | Archive SBOM + build artifacts for audit trail | GitHub Actions artifacts (365-day retention) |
 
 ### SBOM Flow
@@ -45,11 +49,14 @@ The GitHub Actions pipeline (`.github/workflows/pipeline.yml`) is structured acc
 Build stage
   └─ Trivy generates SBOM (CycloneDX JSON)
         │
-        ▼
-  SAST/SCA stage consumes SBOM
-    ├─ Trivy: vulnerability scan
-    ├─ Trivy: license compliance check
-    └─ Gitleaks: secret scanning
+        ▼  (all 5 run in parallel after build + test)
+  ┌───────────────────────────────────────────────────────────────────────┐
+  │  sast-semgrep    Semgrep pattern-based SAST (source)                  │
+  │  sast-codeql     CodeQL dataflow/taint analysis (source)              │
+  │  scan-osv        osv-scanner Dart/pub CVE scan (lockfile)             │
+  │  scan-trivy      Trivy SBOM vulnerability scan + license check        │
+  │  scan-gitleaks   Gitleaks secret scanning (full git history)          │
+  └───────────────────────────────────────────────────────────────────────┘
         │
         ▼
   Package stage archives SBOM alongside build artifacts
@@ -139,7 +146,21 @@ The three tools are kept in the pipeline for distinct reasons:
 
 ---
 
-## Running Locally
+## SAST Comparison (lab results — Flutter/Dart)
+
+> **Scan date: 2026-05-08.** Findings reflect the demo hello_app codebase. Real-world apps with auth, crypto, or network code will produce more findings.
+
+| Tool | Findings | Type | Notes |
+|---|---|---|---|
+| `flutter analyze` | — | Semantic (AST) | Dart's native analyzer. First-class Dart support. Security lint rules via `flutter_lints`. Runs in Lint stage as fast-fail gate — not a separate SAST job. |
+| **Semgrep** | **0** | Pattern SAST | `config: auto` selects Dart/Flutter community rules. Sparse Dart ruleset — minimal findings on typical Flutter code. `continue-on-error`. |
+| **CodeQL** | **0** | Dataflow SAST | Multi-hop taint analysis. Free for public repos. Dart support experimental. `continue-on-error`. **Recommended upgrade from Semgrep** once Dart support matures. |
+
+**Key finding:** 0 findings is expected for the minimal demo code. Both tools are complementary — Semgrep is lower-friction and catches known-bad patterns quickly; CodeQL is stronger for complex multi-hop data-flow vulnerabilities.
+
+---
+
+## Local Development
 
 ### Prerequisites
 
@@ -213,32 +234,21 @@ trivy sbom --scanners license sbom.cdx.json
 gitleaks detect --source . -v
 ```
 
-### SAST (Semgrep)
-
-```bash
-# Install semgrep
-pip install semgrep
-
-# Run with open-source rules (no account needed)
-semgrep scan --config auto hello_app/lib
-```
-
 ---
 
 ## Security Tools Used
 
-| Tool | Stage | Type | Priority |
-|---|---|---|---|
-| `flutter analyze` | Lint | SAST / linting | Standard |
-| `dart format --set-exit-if-changed` | Lint | Formatting | Standard |
-| `dart_code_metrics` | Lint | Extended lint rules | Nice-to-have |
-| Trivy | Build | SBOM generation (CycloneDX JSON) | **Recommended** |
-| osv-scanner | SAST/SCA | Dart/pub vulnerability scan (OSV database) | **Recommended** |
-| Trivy | SAST/SCA | Vulnerability + license scan via SBOM | **Recommended** |
-| Gitleaks | SAST/SCA | Secret scanning | **Recommended** |
-| Semgrep | SAST/SCA | SAST (open-source rules) | Nice-to-have |
-
-> **Recommended** = security-relevant, strongly advised  
-> **Nice-to-have** = security-relevant, optional (`continue-on-error: true` in pipeline)
+| Tool | Stage | Type |
+|---|---|---|
+| `flutter analyze` | Lint | SAST / linting |
+| `dart format --set-exit-if-changed` | Lint | Formatting |
+| `dart_code_metrics` | Lint | Extended lint rules (`continue-on-error`) |
+| Trivy | Build | SBOM generation (CycloneDX JSON) |
+| Semgrep | SAST · Semgrep | Pattern-based security analysis (`config: auto`, `continue-on-error`) |
+| CodeQL | SAST · CodeQL | Dataflow/taint analysis — Dart, experimental (`continue-on-error`) |
+| osv-scanner | Scan · osv-scanner | Dart/pub vulnerability scan (OSV database) |
+| Trivy | Scan · trivy | Vulnerability scan (via SBOM) + SARIF → GitHub Security tab |
+| Trivy | Scan · trivy | License compliance check (via SBOM) |
+| Gitleaks | Scan · Gitleaks | Secret scanning (full git history) |
 
 

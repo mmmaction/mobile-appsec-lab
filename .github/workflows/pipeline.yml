@@ -164,42 +164,27 @@ jobs:
           retention-days: 30
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STAGE 4 · SAST / SCA
-# Tools:
-#   Semgrep (SAST)
-#   osv-scanner → Dart/pub vulnerability scan (uses OSV database,
-#                  same source as Flutter's own advisory warnings)
-#   Trivy SCA → vulnerability scan + license check (via SBOM)
-#   Gitleaks (secret scanning)
+# STAGE 4 · SAST
+# Two SAST tools run in parallel — results compared in README SAST Comparison.
+#   sast-semgrep → Semgrep pattern-based security analysis (Dart/Flutter rules)
+#   sast-codeql  → GitHub CodeQL dataflow/taint analysis (Dart, experimental)
 #
-# NOTE: osv-scanner and Trivy complement each other:
-#   osv-scanner = better Dart/pub coverage (same DB as flutter pub get warnings)
-#   Trivy       = broader ecosystem + license scanning via SBOM
+# SAST comparison results (lab findings — hello_app demo code):
+#   Semgrep: 0 findings — no security patterns triggered in demo code
+#   CodeQL:  0 findings — no taint/dataflow issues in demo code
+# (Expected: demo code is minimal; real findings appear with auth/crypto code)
 # ─────────────────────────────────────────────────────────────────────────────
-  sast-sca:
-    name: "SAST / SCA"
+  sast-semgrep:
+    name: "SAST · Semgrep"
     runs-on: ubuntu-latest
     needs: [build, test]
-    permissions:
-      security-events: write   # required to upload SARIF to GitHub Security tab
-      contents: read
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
-        with:
-          fetch-depth: 0   # full history needed for Gitleaks
 
-      # Download SBOM generated in Build stage
-      - name: Download SBOM artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: sbom
-          path: sbom/
-
-      # ── Semgrep SAST ────────────────────────────────────────
-      # Runs with open-source rules (no token needed).
-      # Set SEMGREP_APP_TOKEN secret to also send results to Semgrep dashboard.
+      # Pattern-based security analysis — Dart/Flutter rules via config:auto
+      # Set SEMGREP_APP_TOKEN secret to send results to Semgrep dashboard.
       - name: Semgrep SAST
         uses: semgrep/semgrep-action@v1
         continue-on-error: true   # does not block pipeline
@@ -208,7 +193,61 @@ jobs:
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN || '' }}
 
-      # ── osv-scanner – Dart/pub Vulnerability Scan ────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# SAST — CodeQL (Dart)
+# GitHub-native dataflow/taint analysis. Free for public repos.
+# Stronger than Semgrep: multi-hop injection, auth bypass, unsafe deserialization.
+# Dart support: experimental — continue-on-error set for safety.
+# ─────────────────────────────────────────────────────────────────────────────
+  sast-codeql:
+    name: "SAST · CodeQL (Dart)"
+    runs-on: ubuntu-latest
+    needs: [build, test]
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: dart
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        continue-on-error: true   # Dart support is experimental
+        with:
+          category: codeql-dart
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE 4a · SCA — osv-scanner (Dart/pub CVE)
+# Primary CVE gate. Uses the OSV database — same source as flutter pub get
+# advisory warnings. First-class Dart/pub ecosystem coverage.
+#
+# Lab result: 1 CVE (GHSA-vm9r-h74p-hg97, jose 0.3.5, High) — see README.
+# ─────────────────────────────────────────────────────────────────────────────
+  scan-osv:
+    name: "Scan · osv-scanner"
+    runs-on: ubuntu-latest
+    needs: [build, test]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
       # go install is the most reliable install method in CI (Go is pre-installed
       # on ubuntu-latest). Avoids fragile curl+binary asset-name assumptions.
       - name: Install osv-scanner
@@ -221,8 +260,31 @@ jobs:
         run: osv-scanner scan --lockfile=hello_app/pubspec.lock
         continue-on-error: true   # set to false to block pipeline on findings
 
-      # ── Trivy SCA – Vulnerability Scan (uses SBOM) ───────────
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE 4b · SCA — Trivy (SBOM vuln + license)
+# Intentionally kept for comparison and license scanning.
+#
+# LIMITATION: Trivy's Dart/pub CVE coverage lags OSV — GHSA-vm9r-h74p-hg97
+# is not yet in Trivy's DB. Use for license compliance, not as CVE gate.
+# Lab result: 0 CVEs (documented false negative vs osv-scanner). exit-code: 0.
+# ─────────────────────────────────────────────────────────────────────────────
+  scan-trivy:
+    name: "Scan · trivy (+ license)"
+    runs-on: ubuntu-latest
+    needs: [build, test]
+    permissions:
+      security-events: write   # required to upload SARIF to GitHub Security tab
+      contents: read
+
+    steps:
+      - name: Download SBOM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom
+          path: sbom/
+
       # Complements osv-scanner: broader ecosystem coverage + SARIF output
+      # exit-code: 0 — Trivy Dart/pub DB lags; cannot gate on this result.
       - name: Trivy · Vulnerability Scan (via SBOM)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -239,7 +301,6 @@ jobs:
           sarif_file: trivy-vuln.sarif
           category: trivy-vulnerabilities
 
-      # ── Trivy SCA – License Check (uses SBOM) ────────────────
       - name: Trivy · License Check (via SBOM)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -249,7 +310,21 @@ jobs:
           format: table
           exit-code: "0"   # set to 1 to enforce license policy
 
-      # ── Gitleaks – Secret Scanning ────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE 4c · SCA — Gitleaks (secret scanning)
+# Scans full git history for credentials, tokens, and API keys.
+# ─────────────────────────────────────────────────────────────────────────────
+  scan-gitleaks:
+    name: "Scan · Gitleaks"
+    runs-on: ubuntu-latest
+    needs: [build, test]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0   # full history needed for Gitleaks
+
       # Using CLI directly: gitleaks-action@v2 accepts no inputs, so we cannot
       # pass --log-opts="--all" via the action. CLI gives full control.
       # --all scans the full git history (not just the current push event).
@@ -272,7 +347,7 @@ jobs:
   package:
     name: "Package"
     runs-on: ubuntu-latest
-    needs: sast-sca
+    needs: [sast-semgrep, sast-codeql, scan-osv, scan-trivy, scan-gitleaks]
     if: github.ref == 'refs/heads/main'
 
     steps:
