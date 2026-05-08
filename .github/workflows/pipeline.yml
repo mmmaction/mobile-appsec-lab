@@ -165,13 +165,11 @@ jobs:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 4 · SAST
-# Two SAST tools run in parallel — results compared in README SAST Comparison.
+# One SAST tool — CodeQL does NOT support Dart (unsupported language).
 #   sast-semgrep → Semgrep pattern-based security analysis (Dart/Flutter rules)
-#   sast-codeql  → GitHub CodeQL dataflow/taint analysis (Dart, experimental)
 #
 # SAST comparison results (lab findings — hello_app demo code):
 #   Semgrep: 0 findings — no security patterns triggered in demo code
-#   CodeQL:  0 findings — no taint/dataflow issues in demo code
 # (Expected: demo code is minimal; real findings appear with auth/crypto code)
 # ─────────────────────────────────────────────────────────────────────────────
   sast-semgrep:
@@ -192,45 +190,6 @@ jobs:
           config: auto
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN || '' }}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SAST — CodeQL (Dart)
-# GitHub-native dataflow/taint analysis. Free for public repos.
-# Stronger than Semgrep: multi-hop injection, auth bypass, unsafe deserialization.
-# Dart support: experimental — continue-on-error set for safety.
-# ─────────────────────────────────────────────────────────────────────────────
-  sast-codeql:
-    name: "SAST · CodeQL (Dart)"
-    runs-on: ubuntu-latest
-    needs: [build, test]
-    permissions:
-      security-events: write
-      actions: read
-      contents: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6.0.2
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
-        with:
-          languages: dart
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4
-        continue-on-error: true   # Dart support is experimental
-        with:
-          category: codeql-dart
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 4a · SCA — osv-scanner (Dart/pub CVE)
@@ -262,14 +221,17 @@ jobs:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 4b · SCA — Trivy (SBOM vuln + license)
-# Intentionally kept for comparison and license scanning.
+# Intentionally kept for comparison and to surface results in GitHub Security tab.
 #
-# LIMITATION: Trivy's Dart/pub CVE coverage lags OSV — GHSA-vm9r-h74p-hg97
-# is not yet in Trivy's DB. Use for license compliance, not as CVE gate.
-# Lab result: 0 CVEs (documented false negative vs osv-scanner). exit-code: 0.
+# DOCUMENTED LIMITATION: Trivy has NO Dart/pub ecosystem support:
+#   - CVE scan:     0 results (false negative — GHSA-vm9r-h74p-hg97 not in Trivy pub DB)
+#   - License scan: ‘-’ (Not scanned — Trivy cannot extract license data from pub packages)
+# Both are Trivy ecosystem gaps, not stale DB issues. DB is refreshed daily.
+# Use scan-osv for CVEs and scan-pub-license for license compliance.
+# exit-code: 0 on all steps — cannot gate on Trivy results for Dart/pub.
 # ─────────────────────────────────────────────────────────────────────────────
   scan-trivy:
-    name: "Scan · trivy (+ license)"
+    name: "Scan · trivy"
     runs-on: ubuntu-latest
     needs: [build, test]
     permissions:
@@ -283,8 +245,9 @@ jobs:
           name: sbom
           path: sbom/
 
-      # Complements osv-scanner: broader ecosystem coverage + SARIF output
-      # exit-code: 0 — Trivy Dart/pub DB lags; cannot gate on this result.
+      # KNOWN LIMITATION: Trivy Dart/pub DB does not include GHSA-vm9r-h74p-hg97.
+      # Kept for SARIF upload to GitHub Security tab and cross-ecosystem comparison.
+      # exit-code: 0 — cannot gate on this result for Dart/pub.
       - name: Trivy · Vulnerability Scan (via SBOM)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -293,7 +256,7 @@ jobs:
           format: sarif
           output: trivy-vuln.sarif
           severity: CRITICAL,HIGH,MEDIUM
-          exit-code: "0"   # set to 1 to break pipeline on findings
+          exit-code: "0"   # cannot gate — Trivy has no pub CVE coverage
 
       - name: Upload Trivy vuln results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v4
@@ -301,6 +264,8 @@ jobs:
           sarif_file: trivy-vuln.sarif
           category: trivy-vulnerabilities
 
+      # KNOWN LIMITATION: Trivy reports '-' (Not scanned) for pub license data.
+      # Use scan-pub-license job for actual Dart/pub license compliance.
       - name: Trivy · License Check (via SBOM)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -308,7 +273,41 @@ jobs:
           scan-ref: sbom/sbom.cdx.json
           scanners: license
           format: table
-          exit-code: "0"   # set to 1 to enforce license policy
+          exit-code: "0"   # cannot gate — Trivy has no pub license coverage
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STAGE 4d · SCA — pub_license (Dart/pub license compliance)
+# Dart-native license scanner by VeryGoodVentures (MIT). Reads pubspec.lock
+# and reports SPDX license per package. Fills the gap Trivy leaves for pub.
+# https://github.com/VeryGoodOpenSource/pub_license
+# ─────────────────────────────────────────────────────────────────────────────
+  scan-pub-license:
+    name: "Scan · pub_license"
+    runs-on: ubuntu-latest
+    needs: [build, test]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Install pub_license
+        run: dart pub global activate pub_license
+
+      - name: pub_license · License Check
+        run: |
+          export PATH="$PATH:$(dart pub global list 2>/dev/null | head -1 | awk '{print $NF}' || echo $HOME/.pub-cache/bin)"
+          export PATH="$PATH:$HOME/.pub-cache/bin"
+          pub_license --not-allowed="GPL-2.0,GPL-3.0,AGPL-3.0" || true
+          # Remove '|| true' and set exit code to 1 to block pipeline on disallowed licenses
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 4c · SCA — Gitleaks (secret scanning)
@@ -347,7 +346,7 @@ jobs:
   package:
     name: "Package"
     runs-on: ubuntu-latest
-    needs: [sast-semgrep, sast-codeql, scan-osv, scan-trivy, scan-gitleaks]
+    needs: [sast-semgrep, scan-osv, scan-trivy, scan-pub-license, scan-gitleaks]
     if: github.ref == 'refs/heads/main'
 
     steps:

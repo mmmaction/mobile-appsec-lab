@@ -37,9 +37,9 @@ The GitHub Actions pipeline (`.github/workflows/pipeline.yml`) is structured acc
 | **Build + SBOM** | Compile app for Web & Android, generate SBOM | `flutter build`, Trivy (CycloneDX JSON) |
 | **Unit Test** | Run tests with code coverage | `flutter test --coverage`, lcov |
 | **SAST · Semgrep** | Pattern-based security analysis (Dart/Flutter rules) | Semgrep (`config: auto`) |
-| **SAST · CodeQL** | Dataflow/taint analysis, free for public repos (Dart, experimental) | GitHub CodeQL |
 | **Scan · osv-scanner** | Dart/pub CVE scan — **primary CVE gate** | osv-scanner (OSV database) |
-| **Scan · trivy** | CVE scan via SBOM + license compliance | Trivy |
+| **Scan · trivy** | CVE scan via SBOM (documented gap) + SARIF → GitHub Security tab | Trivy |
+| **Scan · pub_license** | Dart/pub license compliance — **primary license gate** | `pub_license` (VeryGoodVentures) |
 | **Scan · Gitleaks** | Secret scanning (full git history) | Gitleaks |
 | **Package** | Archive SBOM + build artifacts for audit trail | GitHub Actions artifacts (365-day retention) |
 
@@ -51,11 +51,11 @@ Build stage
         │
         ▼  (all 5 run in parallel after build + test)
   ┌───────────────────────────────────────────────────────────────────────┐
-  │  sast-semgrep    Semgrep pattern-based SAST (source)                  │
-  │  sast-codeql     CodeQL dataflow/taint analysis (source)              │
-  │  scan-osv        osv-scanner Dart/pub CVE scan (lockfile)             │
-  │  scan-trivy      Trivy SBOM vulnerability scan + license check        │
-  │  scan-gitleaks   Gitleaks secret scanning (full git history)          │
+  │  sast-semgrep      Semgrep pattern-based SAST (source)               │
+  │  scan-osv          osv-scanner Dart/pub CVE scan (lockfile)           │
+  │  scan-trivy        Trivy SBOM vulnerability scan (documented gap)     │
+  │  scan-pub-license  pub_license Dart/pub license compliance            │
+  │  scan-gitleaks     Gitleaks secret scanning (full git history)        │
   └───────────────────────────────────────────────────────────────────────┘
         │
         ▼
@@ -125,15 +125,16 @@ This demonstrates:
 |---|---|---|---|
 | **osv-scanner** | **1** | **1** | GHSA-vm9r-h74p-hg97 (`jose 0.3.5`). Same OSV database as `flutter pub get` advisory warnings. **Recommended for Dart/pub CVE gate.** |
 | **grype** | **1** | **1** | GHSA-vm9r-h74p-hg97 (`jose 0.3.5`). Uses GitHub Advisory Database. Correctly reports `FIXED IN: 0.3.5+1`. |
-| **Trivy** (sbom scan) | 0 | — | ❌ Limited Dart/pub ecosystem coverage — GHSA-vm9r-h74p-hg97 is not yet in Trivy's DB. Use for license compliance only. |
+| **Trivy** (sbom scan) | 0 | — | ❌ No Dart/pub CVE coverage — GHSA-vm9r-h74p-hg97 not in Trivy pub DB. Also no license data (`-` / Not scanned). Kept for SARIF upload to GitHub Security tab. **Not a security gate for Dart/pub.** |
 | **Dependency-Track** | 0 | — | ❌ Advisory not in NVD/OSS Index with a matching `pkg:pub` PURL. Processing confirmed complete (42 components ingested). Same gap as Trivy; will self-update when NVD/OSS Index propagates the advisory. |
 | **Snyk** | not tested | — | Not tested in this lab (requires account + `snyk auth`). Snyk maintains its own **proprietary, closed vulnerability database** — this is its core differentiator and not publicly auditable. CLI is open source (Apache 2.0) but is just a client to Snyk's backend. Limited free tier for open-source; paid subscription required for private repos and team features. Widely adopted in enterprise environments; worth evaluating if a commercial SLA and unified multi-language dashboard are required. |
 
 **Key finding:** Both osv-scanner and grype detect `GHSA-vm9r-h74p-hg97` — but from different databases (OSV vs GitHub Advisories). Trivy and Dependency-Track both miss it due to NVD/OSS Index propagation lag for Dart/pub advisories. **osv-scanner remains the recommended gate** as it has first-class Dart/pub coverage; grype is a good secondary check.
 
-The three tools are kept in the pipeline for distinct reasons:
+The tools are kept in the pipeline for distinct reasons:
 - **osv-scanner** → Dart/pub CVE detection (primary security gate)
-- **Trivy** → license compliance scanning via SBOM (separate concern, not a CVE tool here)
+- **Trivy** → SARIF upload to GitHub Security tab for comparison; no pub CVE or license coverage
+- **pub_license** → Dart/pub license compliance (fills gap Trivy cannot cover)
 - **Dependency-Track** → continuous re-scanning without a new build; catches new CVEs for already-shipped versions
 
 ### Notable osv-scanner findings
@@ -154,9 +155,9 @@ The three tools are kept in the pipeline for distinct reasons:
 |---|---|---|---|
 | `flutter analyze` | — | Semantic (AST) | Dart's native analyzer. First-class Dart support. Security lint rules via `flutter_lints`. Runs in Lint stage as fast-fail gate — not a separate SAST job. |
 | **Semgrep** | **0** | Pattern SAST | `config: auto` selects Dart/Flutter community rules. Sparse Dart ruleset — minimal findings on typical Flutter code. `continue-on-error`. |
-| **CodeQL** | **0** | Dataflow SAST | Multi-hop taint analysis. Free for public repos. Dart support experimental. `continue-on-error`. **Recommended upgrade from Semgrep** once Dart support matures. |
+| ~~CodeQL~~ | ~~N/A~~ | ~~Dataflow SAST~~ | ❌ CodeQL does not support Dart — removed from pipeline. Supported languages: cpp, csharp, go, java, javascript, python, ruby, swift. |
 
-**Key finding:** 0 findings is expected for the minimal demo code. Both tools are complementary — Semgrep is lower-friction and catches known-bad patterns quickly; CodeQL is stronger for complex multi-hop data-flow vulnerabilities.
+**Key finding:** 0 findings is expected for the minimal demo code. `flutter analyze` remains the primary semantic quality gate; Semgrep adds lightweight security pattern matching on top.
 
 ---
 
@@ -221,9 +222,22 @@ trivy fs --format cyclonedx --output sbom.cdx.json hello_app
 trivy sbom --severity CRITICAL,HIGH,MEDIUM sbom.cdx.json
 ```
 
-### SCA – License Check (via SBOM)
+### SCA – License Check (pub_license)
 
 ```bash
+# Install pub_license
+dart pub global activate pub_license
+
+# Run from repo root (reads hello_app/pubspec.lock)
+export PATH="$PATH:$HOME/.pub-cache/bin"
+pub_license --not-allowed="GPL-2.0,GPL-3.0,AGPL-3.0"
+```
+
+### SCA – License Check (Trivy — documented gap)
+
+```bash
+# NOTE: Trivy reports '-' (Not scanned) for pub packages — no pub license support.
+# Use pub_license above for actual Dart/pub license compliance.
 trivy sbom --scanners license sbom.cdx.json
 ```
 
@@ -245,10 +259,9 @@ gitleaks detect --source . -v
 | `dart_code_metrics` | Lint | Extended lint rules (`continue-on-error`) |
 | Trivy | Build | SBOM generation (CycloneDX JSON) |
 | Semgrep | SAST · Semgrep | Pattern-based security analysis (`config: auto`, `continue-on-error`) |
-| CodeQL | SAST · CodeQL | Dataflow/taint analysis — Dart, experimental (`continue-on-error`) |
 | osv-scanner | Scan · osv-scanner | Dart/pub vulnerability scan (OSV database) |
-| Trivy | Scan · trivy | Vulnerability scan (via SBOM) + SARIF → GitHub Security tab |
-| Trivy | Scan · trivy | License compliance check (via SBOM) |
+| Trivy | Scan · trivy | CVE scan via SBOM + SARIF → GitHub Security tab (no pub coverage — documented) |
+| pub_license | Scan · pub-license | Dart/pub license compliance — fills Trivy gap for pub ecosystem |
 | Gitleaks | Scan · Gitleaks | Secret scanning (full git history) |
 
 
