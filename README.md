@@ -110,6 +110,35 @@ This demonstrates:
 
 ---
 
+## CVE Scanner Comparison (lab results — Flutter pub dependencies)
+
+> **Scan date: 2026-05-08.** Results reflect the vulnerability databases at that date. Re-run `osv-scanner scan --lockfile=hello_app/pubspec.lock` to get current numbers.
+
+| Tool | CVEs found | High | Notes |
+|---|---|---|---|
+| **osv-scanner** | **1** | **1** | GHSA-vm9r-h74p-hg97 (`jose 0.3.5`). Same OSV database as `flutter pub get` advisory warnings. **Recommended for Dart/pub CVE gate.** |
+| **grype** | **1** | **1** | GHSA-vm9r-h74p-hg97 (`jose 0.3.5`). Uses GitHub Advisory Database. Correctly reports `FIXED IN: 0.3.5+1`. |
+| **Trivy** (sbom scan) | 0 | — | ❌ Limited Dart/pub ecosystem coverage — GHSA-vm9r-h74p-hg97 is not yet in Trivy's DB. Use for license compliance only. |
+| **Dependency-Track** | 0 | — | ❌ Advisory not in NVD/OSS Index with a matching `pkg:pub` PURL. Processing confirmed complete (42 components ingested). Same gap as Trivy; will self-update when NVD/OSS Index propagates the advisory. |
+| **Snyk** | not tested | — | Not tested in this lab (requires account + `snyk auth`). Snyk maintains its own **proprietary, closed vulnerability database** — this is its core differentiator and not publicly auditable. CLI is open source (Apache 2.0) but is just a client to Snyk's backend. Limited free tier for open-source; paid subscription required for private repos and team features. Widely adopted in enterprise environments; worth evaluating if a commercial SLA and unified multi-language dashboard are required. |
+
+**Key finding:** Both osv-scanner and grype detect `GHSA-vm9r-h74p-hg97` — but from different databases (OSV vs GitHub Advisories). Trivy and Dependency-Track both miss it due to NVD/OSS Index propagation lag for Dart/pub advisories. **osv-scanner remains the recommended gate** as it has first-class Dart/pub coverage; grype is a good secondary check.
+
+The three tools are kept in the pipeline for distinct reasons:
+- **osv-scanner** → Dart/pub CVE detection (primary security gate)
+- **Trivy** → license compliance scanning via SBOM (separate concern, not a CVE tool here)
+- **Dependency-Track** → continuous re-scanning without a new build; catches new CVEs for already-shipped versions
+
+### Notable osv-scanner findings
+
+| Advisory | CVSS | Package | Version | Description |
+|---|---|---|---|---|
+| [GHSA-vm9r-h74p-hg97](https://osv.dev/GHSA-vm9r-h74p-hg97) | 7.5 (High) | `jose` | 0.3.5 | JWT token forgery via attacker-controlled JWK in JOSE header — fix: `^0.3.5+1` |
+
+> **Note:** `jose 0.3.5` is intentionally pinned in `pubspec.yaml` as a demo finding. See [Demo Findings](#demo-findings) above.
+
+---
+
 ## Running Locally
 
 ### Prerequisites
