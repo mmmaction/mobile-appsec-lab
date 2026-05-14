@@ -40,7 +40,7 @@ The GitHub Actions pipeline (`.github/workflows/pipeline.yml`) is structured acc
 | **Scan · osv-scanner** | Dart/pub CVE scan — **primary CVE gate** | osv-scanner (OSV database) |
 | **Scan · trivy** | CVE scan via SBOM (documented gap) + SARIF → GitHub Security tab | Trivy |
 | **Scan · license_finder** | Dart/pub license compliance (`unknown` = package has no LICENSE file in pub cache) | `license_finder` (Pivotal) |
-| **Scan · Dependency-Track** | Upload SBOM for continuous re-scanning; 0 CVEs expected (pub advisory lag — documented) | OWASP Dependency-Track |
+| **Scan · Dependency-Track** | Upload SBOM for continuous re-scanning; detects `jose 0.3.5` when Google OSV + `Pub` ecosystem enabled (0 CVEs with default NVD-only config) | OWASP Dependency-Track |
 | **Scan · Gitleaks** | Secret scanning (full git history) | Gitleaks |
 | **Package** | Archive SBOM + build artifacts for audit trail | GitHub Actions artifacts (365-day retention) |
 
@@ -121,23 +121,23 @@ This demonstrates:
 
 ## CVE Scanner Comparison (lab results — Flutter pub dependencies)
 
-> **Scan date: 2026-05-08.** Results reflect the vulnerability databases at that date. Re-run `osv-scanner scan --lockfile=hello_app/pubspec.lock` to get current numbers.
+> **Scan date: 2026-05-14.** Results reflect the vulnerability databases at that date. Re-run `osv-scanner scan --lockfile=hello_app/pubspec.lock` to get current numbers.
 
 | Tool | CVEs found | High | Notes |
 |---|---|---|---|
 | **osv-scanner** | **1** | **1** | GHSA-vm9r-h74p-hg97 (`jose 0.3.5`). Same OSV database as `flutter pub get` advisory warnings. **Recommended for Dart/pub CVE gate.** |
 | **grype** | **1** | **1** | GHSA-vm9r-h74p-hg97 (`jose 0.3.5`). Uses GitHub Advisory Database. Correctly reports `FIXED IN: 0.3.5+1`. |
 | **Trivy** (sbom scan) | 0 | — | ❌ No Dart/pub CVE coverage — GHSA-vm9r-h74p-hg97 not in Trivy pub DB. Also no license data (`-` / Not scanned). Kept for SARIF upload to GitHub Security tab. **Not a security gate for Dart/pub.** |
-| **Dependency-Track** | 0 | — | ❌ Advisory not in NVD/OSS Index with a matching `pkg:pub` PURL. Processing confirmed complete (42 components ingested). Same gap as Trivy; will self-update when NVD/OSS Index propagates the advisory. |
+| **Dependency-Track** | **1** | **1** | ✅ GHSA-vm9r-h74p-hg97 (`jose 0.3.5`) detected — **requires Google OSV source enabled with `Pub` ecosystem** in Administration → Vulnerability Sources. Default config (NVD only) finds 0. |
 | **Snyk** | not tested | — | Not tested in this lab (requires account + `snyk auth`). Snyk maintains its own **proprietary, closed vulnerability database** — this is its core differentiator and not publicly auditable. CLI is open source (Apache 2.0) but is just a client to Snyk's backend. Limited free tier for open-source; paid subscription required for private repos and team features. Widely adopted in enterprise environments; worth evaluating if a commercial SLA and unified multi-language dashboard are required. |
 
-**Key finding:** Both osv-scanner and grype detect `GHSA-vm9r-h74p-hg97` — but from different databases (OSV vs GitHub Advisories). Trivy and Dependency-Track both miss it due to NVD/OSS Index propagation lag for Dart/pub advisories. **osv-scanner remains the recommended gate** as it has first-class Dart/pub coverage; grype is a good secondary check.
+**Key finding:** osv-scanner, grype, and Dependency-Track (with OSV configured) all detect `GHSA-vm9r-h74p-hg97`. Trivy misses it. DT requires the Google OSV vulnerability source to be enabled with the `Pub` ecosystem — the default NVD-only setup finds 0 CVEs for Dart/pub. **osv-scanner remains the recommended CI gate** (zero config, first-class Dart/pub coverage); DT with OSV is the recommended continuous monitoring layer.
 
 The tools are kept in the pipeline for distinct reasons:
 - **osv-scanner** → Dart/pub CVE detection (primary security gate)
 - **Trivy** → SARIF upload to GitHub Security tab for comparison; no pub CVE or license coverage
 - **license_finder** → Dart/pub license compliance; `unknown` entries mean the package has no LICENSE file in its pub cache dir (package metadata quality issue)
-- **Dependency-Track** → continuous re-scanning without a new build; 0 CVEs currently (NVD/OSS Index lag for pub advisories) — will self-update as databases propagate
+- **Dependency-Track** → continuous re-scanning without a new build; finds `jose 0.3.5` when Google OSV + `Pub` ecosystem is enabled (Administration → Vulnerability Sources). Default NVD-only config finds 0 CVEs for Dart/pub.
 
 ### Notable osv-scanner findings
 
