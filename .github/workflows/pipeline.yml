@@ -443,7 +443,10 @@ jobs:
         working-directory: ${{ github.workspace }}
 
       - name: Grype · Vulnerability Scan (via Syft SBOM)
-        run: grype sbom:sbom-syft/sbom-syft.cdx.json --output table
+        run: |
+          SBOM=$(find sbom-syft/ -name "*.json" | head -1)
+          echo "Scanning: $SBOM"
+          grype sbom:"$SBOM" --output table
         working-directory: ${{ github.workspace }}
         # Grype exits 0 by default (no --fail-on flag) — informational only.
         # To make this a blocking gate, add: --fail-on high
