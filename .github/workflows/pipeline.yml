@@ -444,7 +444,7 @@ jobs:
 
       - name: Grype · Vulnerability Scan (via Syft SBOM)
         run: |
-          SBOM=$(find sbom-syft/ -name "*.json" | head -1)
+          SBOM=$(find sbom-syft/ -type f | head -1)
           echo "Scanning: $SBOM"
           grype sbom:"$SBOM" --output table
         working-directory: ${{ github.workspace }}
