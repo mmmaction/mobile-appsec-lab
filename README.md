@@ -19,7 +19,7 @@ A reference implementation showing how to integrate security tooling into a Flut
 
 ## Purpose
 
-This repo is an **example** for CI/CD security recommendations for Flutter mobile apps (Android, iOS, Web). It is used to:
+This repo is an **example** for CI/CD security tools for Flutter mobile apps (Android, iOS, Web). It is used to:
 
 - Demonstrate which security tools fit where in a pipeline
 - Show how an SBOM (Software Bill of Materials) flows from build to verification to archival
@@ -37,7 +37,7 @@ The GitHub Actions pipeline (`.github/workflows/pipeline.yml`) is structured acc
 | **Build + SBOM** | Compile app for Web & Android, generate SBOM | `flutter build`, Trivy (CycloneDX JSON) |
 | **Unit Test** | Run tests with code coverage | `flutter test --coverage`, lcov |
 | **SAST · Semgrep** | Pattern-based security analysis (Dart/Flutter rules). Note: `flutter analyze` in the Lint stage also provides static analysis (type errors, deprecated APIs) as a fast-fail gate before build. | Semgrep (`config: auto`), `flutter analyze` (Lint) |
-| **Scan · osv-scanner** | Dart/pub CVE scan — **primary CVE gate** | osv-scanner (OSV database) |
+| **Scan · osv-scanner** | Dart/pub CVE scan | osv-scanner (OSV database) |
 | **Scan · trivy** | CVE scan via SBOM (documented gap) + SARIF → GitHub Security tab | Trivy |
 | **Scan · Grype** | CVE scan via Syft SBOM (GitHub Advisory DB — detects `GHSA-vm9r-h74p-hg97`) | Grype (`anchore/scan-action`) |
 | **Scan · license_finder** | Dart/pub license compliance (`unknown` = package has no LICENSE file in pub cache) | `license_finder` (Pivotal) |
@@ -48,21 +48,9 @@ The GitHub Actions pipeline (`.github/workflows/pipeline.yml`) is structured acc
 ### SBOM Flow
 
 ```
-Build stage
-  └─ Trivy generates SBOM (CycloneDX JSON)
-        │
-        ▼  (all 6 run in parallel after build + test)
-  ┌───────────────────────────────────────────────────────────────────────────┐
-  │  sast-semgrep        Semgrep pattern-based SAST (source)              │
-  │  scan-osv            osv-scanner Dart/pub CVE scan (lockfile)         │
-  │  scan-trivy          Trivy SBOM vulnerability scan (documented gap)   │
-  │  scan-license-finder license_finder Dart/pub license report           │
-  │  scan-gitleaks       Gitleaks secret scanning (full git history)      │
-  │  scan-deptrack       Dependency-Track SBOM upload (0 CVEs — pub lag)  │
-  └───────────────────────────────────────────────────────────────────────┘
-        │
-        ▼
-  Package stage archives SBOM alongside build artifacts
+Build -> Compile app -> Generate SBOM (CycloneDX JSON)
+Scan -> CVE scan from SBOM
+Publish -> Archive SBOM
 ```
 
 ### Pipeline Triggers
@@ -71,7 +59,7 @@ Build stage
 |---|---|
 | Push to `main` | On every commit |
 | Pull Request to `main` | On every PR |
-| Scheduled (cron) | Every Monday 07:00 UTC — Trivy re-scan for new CVEs |
+| Scheduled (cron) | Every Monday 07:00 UTC — re-scan for new CVEs |
 | Manual | Via GitHub Actions → "Run workflow" button |
 
 ---
@@ -87,8 +75,7 @@ This repo intentionally contains two security findings to make the pipeline resu
 The package `jose` is pinned to version `0.3.5`, which contains a **High severity** vulnerability (CVSS 7.5):
 
 > An attacker can forge valid JWS/JWT tokens by embedding an attacker-controlled public key in the JOSE header (`jwk`). Because the vulnerable version treats header-provided keys as valid verification candidates, the signature check can be bypassed entirely.
-
-**Detected by:** osv-scanner (same OSV database that Flutter uses internally for advisory warnings)  
+ 
 **Fix:** Upgrade to `jose: ^0.3.5+1`
 
 This demonstrates:
@@ -111,7 +98,6 @@ static const String githubToken = 'ghp_DemoFakeTokenForGitleaksDemo1234567';
 
 **These are not real credentials.** They follow the format of real secrets so that Gitleaks' pattern matching triggers.
 
-**Detected by:** Gitleaks  
 **Fix:** Never commit secrets to source code. Use environment variables, GitHub Actions secrets (`${{ secrets.MY_TOKEN }}`), or a secrets manager (HashiCorp Vault, AWS Secrets Manager, etc.).
 
 This demonstrates:
@@ -128,9 +114,9 @@ This demonstrates:
 |---|---|---|---|
 | **osv-scanner** | **1** | **1** | GHSA-vm9r-h74p-hg97 (`jose 0.3.5`). Same OSV database as `flutter pub get` advisory warnings. **Recommended for Dart/pub CVE gate.** |
 | **grype** | **1** | **1** | GHSA-vm9r-h74p-hg97 (`jose 0.3.5`). Uses GitHub Advisory Database. Correctly reports `FIXED IN: 0.3.5+1`. |
-| **Trivy** (sbom scan) | 0 | — | ⚠️ Trivy documents Dart/pub support via GitHub Advisory Database (Pub) and correctly detects `pubspec.lock`, but misses `GHSA-vm9r-h74p-hg97` — published to GHSA on Apr 1 2026, confirmed absent from Trivy DB with fresh download on 2026-05-15. Not an advisory lag issue; gap in Trivy's pub advisory coverage. Also no license data. Kept for SARIF upload to GitHub Security tab. **Not a reliable security gate for Dart/pub.** |
-| **Dependency-Track** | **1** | **1** | ✅ GHSA-vm9r-h74p-hg97 (`jose 0.3.5`) detected — **requires Google OSV source enabled with `Pub` ecosystem** in Administration → Vulnerability Sources. Default config (NVD only) finds 0. |
-| **Snyk** | 0 | — | ❌ Tested via `snyk sbom test --experimental` using the Trivy-generated CycloneDX SBOM (`dart pub global activate sbom` + `dart pub global run sbom` required to generate a Dart SBOM, but Snyk only accepts JSON — existing `sbom.cdx.json` used instead). 41 dependencies scanned, 0 issues found. Snyk's proprietary database has no Dart/pub CVE coverage. Native `snyk test` requires an Enterprise plan for Dart. |
+| **Trivy** (sbom scan) | 0 | — | Trivy documents Dart/pub support via GitHub Advisory Database (Pub) and correctly detects `pubspec.lock`, but misses `GHSA-vm9r-h74p-hg97` — published to GHSA on Apr 1 2026, confirmed absent from Trivy DB with fresh download on 2026-05-15. Not an advisory lag issue; gap in Trivy's pub advisory coverage. Also no license data. Kept for SARIF upload to GitHub Security tab. **Not a reliable security gate for Dart/pub.** |
+| **Dependency-Track** | **1** | **1** | GHSA-vm9r-h74p-hg97 (`jose 0.3.5`) detected — **requires Google OSV source enabled with `Pub` ecosystem** in Administration → Vulnerability Sources. Default config (NVD only) finds 0. |
+| **Snyk** | 0 | — | Tested via `snyk sbom test --experimental` using the Trivy-generated CycloneDX SBOM (`dart pub global activate sbom` + `dart pub global run sbom` required to generate a Dart SBOM, but Snyk only accepts JSON — existing `sbom.cdx.json` used instead). 41 dependencies scanned, 0 issues found. Snyk's proprietary database has no Dart/pub CVE coverage. Native `snyk test` requires an Enterprise plan for Dart. |
 
 **Key finding:** osv-scanner, grype, and Dependency-Track (with OSV configured) all detect `GHSA-vm9r-h74p-hg97`. Trivy and Snyk both miss it — neither has Dart/pub CVE database coverage. Snyk's native Dart support requires an Enterprise plan; even via SBOM test it finds 0. DT requires the Google OSV vulnerability source to be enabled with the `Pub` ecosystem — the default NVD-only setup finds 0 CVEs for Dart/pub. **osv-scanner remains the recommended CI gate** (zero config, first-class Dart/pub coverage); DT with OSV is the recommended continuous monitoring layer.
 
@@ -154,11 +140,10 @@ The tools are kept in the pipeline for distinct reasons:
 
 > **Scan date: 2026-05-08.** Findings reflect the demo hello_app codebase. Real-world apps with auth, crypto, or network code will produce more findings.
 
-| Tool | Findings | Type | Notes |
-|---|---|---|---|
-| `flutter analyze` | — | Semantic (AST) | Dart's native analyzer. First-class Dart support. Security lint rules via `flutter_lints`. Runs in Lint stage as fast-fail gate — not a separate SAST job. |
-| **Semgrep** | **0** | Pattern SAST | `config: auto` selects Dart/Flutter community rules. Sparse Dart ruleset — minimal findings on typical Flutter code. `continue-on-error`. |
-| ~~CodeQL~~ | ~~N/A~~ | ~~Dataflow SAST~~ | ❌ CodeQL does not support Dart — removed from pipeline. Supported languages: cpp, csharp, go, java, javascript, python, ruby, swift. |
+| Tool | Type | Notes |
+|---|---|---|
+| `flutter analyze` | Semantic (AST) | Dart's native analyzer. First-class Dart support. Security lint rules via `flutter_lints`. Runs in Lint stage as fast-fail gate — not a separate SAST job. |
+| **Semgrep** | Pattern SAST | `config: auto` selects Dart/Flutter community rules. Sparse Dart ruleset — minimal findings on typical Flutter code. `continue-on-error`. |
 
 **Key finding:** 0 findings is expected for the minimal demo code. `flutter analyze` remains the primary semantic quality gate; Semgrep adds lightweight security pattern matching on top.
 
@@ -262,9 +247,11 @@ gitleaks detect --source . -v
 | `dart format --set-exit-if-changed` | Lint | Formatting |
 | `dart_code_metrics` | Lint | Extended lint rules (`continue-on-error`) |
 | Trivy | Build | SBOM generation (CycloneDX JSON) |
+| Syft | Build | SBOM generation (CycloneDX JSON, parallel with Trivy) |
 | Semgrep | SAST · Semgrep | Pattern-based security analysis (`config: auto`, `continue-on-error`) |
 | osv-scanner | Scan · osv-scanner | Dart/pub vulnerability scan (OSV database) |
 | Trivy | Scan · trivy | CVE scan via SBOM + SARIF → GitHub Security tab (no pub coverage — documented) |
+| Grype | Scan · Grype | CVE scan via Syft SBOM (GitHub Advisory DB — detects `GHSA-vm9r-h74p-hg97`, `continue-on-error`) |
 | license_finder | Scan · license-finder | Dart/pub license compliance (`unknown` = missing LICENSE file in pub cache) |
 | OWASP Dependency-Track | Scan · Dependency-Track | Continuous SBOM re-scanning (0 CVEs — pub advisory propagation lag documented) |
 | Gitleaks | Scan · Gitleaks | Secret scanning (full git history) |

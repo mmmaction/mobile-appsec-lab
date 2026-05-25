@@ -157,13 +157,6 @@ jobs:
           output-file: sbom-syft.cdx.json
           artifact-name: sbom-syft
 
-      - name: Upload Syft SBOM artifact
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: sbom-syft
-          path: sbom-syft.cdx.json
-          retention-days: 90
-
 # ─────────────────────────────────────────────────────────────────────────────
 # STAGE 3 · UNIT TEST
 # Tools: flutter test --coverage, lcov
