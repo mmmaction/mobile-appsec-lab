@@ -36,9 +36,10 @@ The GitHub Actions pipeline (`.github/workflows/pipeline.yml`) is structured acc
 | **Lint** | Code style & static analysis (fast-fail) | `flutter analyze`, `dart format --check`, `dart_code_metrics` |
 | **Build + SBOM** | Compile app for Web & Android, generate SBOM | `flutter build`, Trivy (CycloneDX JSON) |
 | **Unit Test** | Run tests with code coverage | `flutter test --coverage`, lcov |
-| **SAST · Semgrep** | Pattern-based security analysis (Dart/Flutter rules) | Semgrep (`config: auto`) |
+| **SAST · Semgrep** | Pattern-based security analysis (Dart/Flutter rules). Note: `flutter analyze` in the Lint stage also provides static analysis (type errors, deprecated APIs) as a fast-fail gate before build. | Semgrep (`config: auto`), `flutter analyze` (Lint) |
 | **Scan · osv-scanner** | Dart/pub CVE scan — **primary CVE gate** | osv-scanner (OSV database) |
 | **Scan · trivy** | CVE scan via SBOM (documented gap) + SARIF → GitHub Security tab | Trivy |
+| **Scan · Grype** | CVE scan via Syft SBOM (GitHub Advisory DB — detects `GHSA-vm9r-h74p-hg97`) | Grype (`anchore/scan-action`) |
 | **Scan · license_finder** | Dart/pub license compliance (`unknown` = package has no LICENSE file in pub cache) | `license_finder` (Pivotal) |
 | **Scan · Dependency-Track** | Upload SBOM for continuous re-scanning; detects `jose 0.3.5` when Google OSV + `Pub` ecosystem enabled (0 CVEs with default NVD-only config) | OWASP Dependency-Track |
 | **Scan · Gitleaks** | Secret scanning (full git history) | Gitleaks |
