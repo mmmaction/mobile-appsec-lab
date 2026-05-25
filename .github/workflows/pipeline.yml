@@ -440,9 +440,11 @@ jobs:
 
       - name: Install Grype
         run: curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+        working-directory: ${{ github.workspace }}
 
       - name: Grype · Vulnerability Scan (via Syft SBOM)
         run: grype sbom:sbom-syft/sbom-syft.cdx.json --output table
+        working-directory: ${{ github.workspace }}
         # Grype exits 0 by default (no --fail-on flag) — informational only.
         # To make this a blocking gate, add: --fail-on high
         continue-on-error: true      # does not block pipeline
